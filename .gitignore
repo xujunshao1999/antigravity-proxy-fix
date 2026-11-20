@@ -2,7 +2,6 @@
 *.exe
 *.obj
 *.o
-!Antigravity-Proxy.cmd
 
 # 本地配置与备份
 *.bak

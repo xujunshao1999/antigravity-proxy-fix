@@ -1,270 +1,178 @@
 # Antigravity Proxy Fix
 
-> 让 Google Antigravity 桌面版和 Antigravity CLI (`agy`) 在中国大陆网络环境下正常工作
+> 让 Google Antigravity 桌面版和 Antigravity CLI (`agy`) 在仅开启系统代理的环境下正常工作，支持插件内嵌栏且不污染全局环境。
 
-[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)]()
-[![Tested](https://img.shields.io/badge/tested-Antigravity%202.29.1%20%7C%20agy%201.5.3-green)]()
+[![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20%7C%20Ubuntu%20%2F%20Linux-blue)]()
+[![Tested](https://img.shields.io/badge/tested-Antigravity%202.33%2B-green)]()
 [![License](https://img.shields.io/badge/license-MIT-lightgrey)]()
 
 ---
 
 ## 问题是什么
 
-Antigravity 和它的 CLI 在只开启代理软件「系统代理」时无法工作：
+Antigravity 和 `agy` CLI 在仅开启代理客户端「系统代理」时无法工作：
 
-**表面症状**
+- **CLI 报错**：`token exchange failed: Post "https://oauth2.googleapis.com/token": dial tcp ...`
+- **桌面版现象**：白屏 / 转圈，外壳日志报 `Failed to load URL: https://127.0.0.1:.../ with error: ERR_TIMED_OUT`
 
-```
-# CLI
-token exchange failed: Post "https://oauth2.googleapis.com/token":
-dial tcp 173.194.203.95:443: connectex: A connection attempt failed...
-```
-
-```
-# 桌面版 —— 白屏/转圈，看起来像本地服务坏了
-electron: Failed to load URL: https://127.0.0.1:12111/ with error: ERR_TIMED_OUT
-```
-
-**真实原因**
-
-Antigravity 是双进程架构：
-
-```
-Antigravity.exe          ← Electron 外壳（认 Windows 系统代理）
-    └─ language_server.exe   ← Go 内核（只认环境变量，不认系统代理）
-```
-
-Go 的 `net/http` 通过 `http.ProxyFromEnvironment` 获取代理配置，**唯一来源是环境变量**。它不读注册表、不读 WinHTTP、不读 PAC。
-
-所以：**浏览器能上 Google，但这两个程序在直连 → 超时 → 卡死。**
+**根本原因**：Antigravity 是双进程架构——Electron 外壳认系统代理，但 Go 编写的内核（`language_server` 与 `agy`）基于 `http.ProxyFromEnvironment`，**只认环境变量，不读 Windows 系统代理或桌面环境图形代理**。只开系统代理时，内核在直连导致超时卡死。
 
 ---
 
 ## 解决方案
 
-**只给目标程序注入代理环境变量，不污染全局。**
-
-```
-普通程序 ──直连──> 不受影响
-Antigravity / agy ──注入 HTTPS_PROXY──> 127.0.0.1:7897
-```
+**只对目标进程树注入 `HTTP_PROXY` / `HTTPS_PROXY` 与 `NO_PROXY=localhost,127.0.0.1,::1`，不污染全局环境变量、不强依赖 TUN 虚拟网卡。**
 
 | 方案 | 侵入性 | 适用范围 |
 |---|---|---|
-| **进程级注入（本仓库）** | 低，仅目标程序 | ✅ 推荐 |
-| 全局环境变量 `setx` | 高，全系统 | ❌ 代理一关全系统断网 |
-| TUN 模式 | 中，需装驱动 | ⚠️ 与游戏反作弊可能冲突 |
+| **进程级注入（本仓库）** | 低，仅目标进程树 | ✅ 推荐 |
+| 全局环境变量 `setx` | 高，全系统 | ❌ 易致本机回环 `502`、代理关闭即全系统断网 |
+| TUN 模式 | 中，需虚拟网卡驱动 | ⚠️ 与部分游戏反作弊可能冲突 |
 
 ---
 
-## 快速开始
+## 快速开始（Windows）
+
+> 全程使用 Windows 自带 `.NET Framework 4 csc.exe` 编译，**无需安装 MinGW 或 Visual Studio**。
 
 ### 1. 桌面版（Antigravity）
 
-```powershell
-# 下载 src/Antigravity-Proxy.cmd，放到 %USERPROFILE%\.agy-shim\
-# 修改里面的端口号（默认 7897）
+编译无窗口原生启动器 `AntigravityProxy.exe` 并改写快捷方式。它无黑框闪屏、原样透传启动参数、可自动适配 `Antigrative Dashboard`（`antigravity-pulse`）内嵌栏调试参数，并对开始菜单快捷方式提供防护：
 
-# 然后运行 scripts/repoint-shortcut.ps1 改写快捷方式
-powershell -ExecutionPolicy Bypass -File .\scripts\repoint-shortcut.ps1
+```powershell
+# 1) 编译 AntigravityProxy.exe 到 %USERPROFILE%\.agy-shim\（按你的代理端口修改 -ProxyUrl）
+powershell -ExecutionPolicy Bypass -File .\scripts\build-desktop-launcher.ps1 -ProxyUrl http://127.0.0.1:7890
+
+# 2) 改写桌面 / 开始菜单 / 任务栏固定快捷方式指向 AntigravityProxy.exe
+#    -AddDebugPort     : 补齐 Dashboard 插件内嵌栏所需的 --remote-debugging-port 参数
+#    -ProtectStartMenu : 写回 Electron AppUserModelID 并对开始菜单快捷方式加只读(+R)，
+#                        防止桌面通知或重启时被 Electron 静默还原
+powershell -ExecutionPolicy Bypass -File .\scripts\repoint-shortcut.ps1 -AddDebugPort -ProtectStartMenu
 ```
 
-**强烈建议同时装自愈脚本。** Antigravity 用 Squirrel/Electron 更新框架，**每次更新都会重建开始菜单快捷方式**并还原成原始 exe——这会静默地让故障复发，而且桌面图标可能还正常，极难排查。
+> 改端口只需编辑 `%USERPROFILE%\.agy-shim\proxy.conf`（写 `http://127.0.0.1:7897` 或直接写 `7897`），**无需重新编译**；如之前用过旧版 `.cmd` 启动器，`build-desktop-launcher.ps1` 会自动把其中自定义端口迁移到 `proxy.conf`。
+
+**建议同时安装登录静默自愈**（防止 Antigravity 自动更新重建开始菜单快捷方式）：
 
 ```powershell
-# 自愈脚本放这里
-Copy-Item .\scripts\self-heal-shortcuts.ps1 "$env:USERPROFILE\.agy-shim\"
-
-# 启动项放这里（每次登录跑一次，无窗口；正常时不写任何东西）
-Copy-Item .\scripts\self-heal-shortcuts.vbs `
-  "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\"
+Copy-Item -Force .\scripts\self-heal-shortcuts.ps1 "$env:USERPROFILE\.agy-shim\"
+Copy-Item -Force .\scripts\self-heal-shortcuts.vbs "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup\"
 ```
 
-### 2. 命令行版（agy）
+### 2. 命令行版（`agy`）
 
 ```powershell
-# 需要 MinGW-w64
-New-Item -ItemType Directory -Force -Path "$env:LOCALAPPDATA\agy\shim"
-gcc -O2 -s -Wall -o "$env:LOCALAPPDATA\agy\shim\agy.exe" src\agy-shim.c -lws2_32
-
-# 加入 PATH 最前
-$shimDir = '%LOCALAPPDATA%\agy\shim'
-$key = Get-Item 'HKCU:\Environment'
-$raw = $key.GetValue('Path','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-$parts = $raw -split ';' | Where-Object { $_.Trim() -ne '' }
-[Microsoft.Win32.Registry]::SetValue('HKEY_CURRENT_USER\Environment','Path',
-    ((@($shimDir) + $parts) -join ';'), [Microsoft.Win32.RegistryValueKind]::ExpandString)
+# 编译 agy.exe 到 %LOCALAPPDATA%\agy\shim\，并以 ExpandString 类型安全加入用户 PATH 最前
+# （共享 %USERPROFILE%\.agy-shim\proxy.conf 配置）
+powershell -ExecutionPolicy Bypass -File .\scripts\build-cli-shim.ps1 -AddToPath
 ```
 
-### 3. 验证
+完成后**重开终端**即可。可用 `.\scripts\agy-proxy-toggle.ps1` 随时启用、停用或查看 shim 状态。
+
+### 3. 验证与一键诊断（Windows）
 
 ```powershell
+# 全面检查桌面启动器、快捷方式、自愈脚本、端口延迟、全局环境洁净度与 CLI shim
+powershell -ExecutionPolicy Bypass -File .\scripts\verify-review.ps1
+
+# 一键排查 Clash 模式/策略组与 Google/Antigravity 各域名 TLS 连通性
+powershell -ExecutionPolicy Bypass -File .\scripts\diagnose-mode.ps1
+
+# 如已安装 CLI shim
 (Get-Command agy).Source        # 应指向 ...\agy\shim\agy.exe
+agy --version                   # 应输出 agy-shim 2.1.0 (cs)
 agy -p "reply OK"               # 应返回 OK
-[Environment]::GetEnvironmentVariable('HTTPS_PROXY','User')   # 应为空
+```
+
+### 4. 一键卸载（Windows）
+
+```powershell
+# 预览将要还原/删除的内容（不修改系统）
+powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows.ps1 -DryRun
+
+# 一键还原快捷方式、清理 PATH、移除自愈启动项与启动器（默认保留 proxy.conf）
+powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows.ps1
+
+# 彻底卸载（连同 proxy.conf 与空目录一并清理）
+powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows.ps1 -Purge
+```
+
+---
+
+## 快速开始（Ubuntu / Linux）
+
+Linux 下无需编译，CLI 与桌面版共用统一 multi-call Bash wrapper，通过 `exec` 直接替换进程透传全部参数与信号，并使用 XDG 用户级 `.desktop` 覆盖系统项（软件包升级不会被重置）：
+
+```bash
+chmod +x linux/*.sh
+
+# 安装 ~/.local/bin/agy 与 ~/.local/bin/antigravity-proxy，写入 ~/.config/agy-proxy/proxy.conf
+# 若本机检测到 antigravity-pulse 插件，会自动补齐内嵌栏调试参数（也可显式传 --with-debug-port）
+./linux/install-linux.sh --proxy http://127.0.0.1:7890
+
+# 确保 ~/.local/bin 在 PATH 最前（写入 ~/.bashrc 或 ~/.zshrc）
+export PATH="$HOME/.local/bin:$PATH"
+
+# 查看状态 / 诊断 / 卸载
+./linux/install-linux.sh --status
+python3 scripts/diagnose-mode.py
+./linux/install-linux.sh --uninstall
 ```
 
 ---
 
 ## 文档
 
-| 文档 | 内容 | 适合谁 |
-|---|---|---|
-| [01 · 技术原理](docs/01-technical-go-proxy.md) | 为什么 Go 程序读不到系统代理；如何从日志定位 | 遇到同类问题的开发者 |
-| [02 · 实践方案](docs/02-practice-per-app-proxy.md) | 三种方案对比、完整实现、代理模式选择 | 想自己配置的人 |
-| [03 · 使用指南](docs/03-usage-guide.md) | 从安装到排查的完整手册（含 CLI 命令详解） | Antigravity 用户 |
-| [AI 协作记录](docs/ai-collaboration/) | 自评 → 同行复核 → 修复的完整闭环 | 研究 AI 工作流的人 |
-| [交接报告](docs/HANDOVER.md) | 架构、决策理由、故障树、遗留问题 | **接手维护的人 / AI** |
+| 文档 | 内容 |
+|---|---|
+| [01 · 技术原理与避坑](docs/01-technical-go-proxy.md) | Go 代理机制、双进程超时根因、进程级注入架构与关键工程坑点 |
+| [02 · 使用与排查指南](docs/02-usage-guide.md) | Windows/Linux 安装、CLI 用法、规则/全局模式对比、故障诊断与账号安全 |
+| [交接报告](docs/HANDOVER.md) | 架构总结、操作手册、故障决策树与剩余跟进事项 |
 
 ---
 
 ## 仓库结构
 
-```
+```text
 .
-├── README.md                          # 本文件
-├── LICENSE                            # MIT
+├── .github/workflows/ci.yml           # CI：ASCII / LF / PS 语法 / Bash 语法 / Linux 冒烟 / csc.exe 编译
+├── README.md
+├── LICENSE
 ├── docs/
-│   ├── 01-technical-go-proxy.md       # 技术原理与排查方法
-│   ├── 02-practice-per-app-proxy.md   # 方案对比与完整实现
-│   ├── 03-usage-guide.md              # 国内使用完全指南
-│   └── ai-collaboration/
-│       ├── 01-self-assessment.md      # AI 自评报告（主动列 4 项弱点）
-│       ├── 02-peer-review.md          # 第一轮独立复核（发现 2 项未披露问题）
-│       ├── 03-response.md             # 第一次回应、修复、方法论复盘
-│       ├── 04-review-round2.md        # 第二轮复核（发现验证时效性盲区）
-│       └── 05-response-round2.md      # 第二次回应（版本自证 + 症状对照）
+│   ├── 01-technical-go-proxy.md       # 技术原理与避坑
+│   ├── 02-usage-guide.md              # Windows & Linux 使用指南
+│   └── HANDOVER.md                    # 交接与维护文档
 ├── src/
-│   ├── agy-shim.c                     # CLI 转发器源码（C，v2.0.0 带版本自证）
-│   └── Antigravity-Proxy.cmd          # 桌面版启动器
+│   ├── ProxyCommon.cs                 # 共享模块：代理探测、proxy.conf 解析与原始命令行提取
+│   ├── AntigravityProxy.cs            # Windows 桌面版无窗口启动器（透传参数、兼容插件）
+│   └── AgyShim.cs                     # Windows CLI 转发器（透传 TUI/Ctrl+C/退出码、版本自证）
+├── linux/
+│   ├── proxy-wrapper.sh               # Ubuntu/Linux 统一 multi-call wrapper（agy & antigravity-proxy）
+│   └── install-linux.sh               # Ubuntu/Linux 一键安装、状态检查与卸载脚本
 └── scripts/
-    ├── repoint-shortcut.ps1           # 改写快捷方式指向启动器（全量重写）
-    ├── self-heal-shortcuts.ps1        # 更新后自动修复（只在被还原时动手）
-    ├── self-heal-shortcuts.vbs        # 启动项包装（无窗口）
-    ├── agy-proxy-toggle.ps1           # agy shim 启用/撤销/查状态
-    ├── query-mihomo.py                # 查询 Clash 实际模式与节点
-    ├── verify-review.ps1              # 全面验证脚本
-    └── sysproxy-toggle.ps1            # 系统代理开关（测试用）
+    ├── build-desktop-launcher.ps1     # 编译 AntigravityProxy.exe 并管理 proxy.conf
+    ├── build-cli-shim.ps1             # 编译 agy.exe 并以 ExpandString 更新用户 PATH
+    ├── repoint-shortcut.ps1           # 改写快捷方式（保留原参数、写回 AUMID、支持 -AddDebugPort/-ProtectStartMenu）
+    ├── self-heal-shortcuts.ps1        # 自包含登录自愈脚本（幂等、绝不清空启动参数）
+    ├── self-heal-shortcuts.vbs        # 启动项无窗口包装
+    ├── agy-proxy-toggle.ps1           # agy shim 启用/停用/状态检查
+    ├── query-mihomo.py                # 跨平台查询 Clash/mihomo 模式与策略组（命名管道 / Unix socket / HTTP）
+    ├── diagnose-mode.ps1              # Windows 一键模式/节点/逐域名 TLS 诊断
+    ├── diagnose-mode.py               # 跨平台一键模式/节点/逐域名 TLS 诊断
+    ├── verify-review.ps1              # Windows 本地部署全面检查脚本
+    └── uninstall-windows.ps1          # Windows 一键卸载脚本（支持 -DryRun / -Purge）
 ```
-
-> **所有 `.ps1` / `.cmd` 都是纯 ASCII（全英文）。** 含中文但无 UTF-8 BOM 的 `.ps1` 在中文 Windows + PowerShell 5.1 下会被按 GBK 解析，报 `TerminatorExpectedAtEndOfString`。全英文方案不依赖任何代码页设置。
 
 ---
 
-## 关键设计点
+## 关键设计与踩过的坑
 
-### agy 转发器（`src/agy-shim.c`）
-
-放在 `PATH` 最前，拦在真实 `agy.exe` 之前：
-
-1. **尊重已有配置**：环境里已有 `HTTPS_PROXY` / `HTTP_PROXY` 就直接放行，不覆盖
-2. **探测失败不注入**：代理没开时保持原生行为，避免"修得更坏"
-3. **退出码精确透传**：`WaitForSingleObject` + `GetExitCodeProcess`
-4. **参数原样透传**：从 `GetCommandLineW` 提取原始参数串，避免二次解析破坏引号
-5. **版本自证**：`agy --version` 可查，用于确认部署的二进制与源码一致
-
-```powershell
-> agy --version
-agy-shim 2.0.0 (built Nov  8 2026)
-```
-
-> **为什么需要版本标记**：GCC 会合并字符串池，用 `strings` 搜 `HTTP_PROXY` 之类的字面量在优化后可能搜不到——新旧版本都数出 1 次，无法区分。所以放一个独立的版本串。
-
-### 为什么 CLI 用 C 而 GUI 用 .cmd
-
-| 程序 | 方式 | 原因 |
-|---|---|---|
-| CLI | 原生 exe | 交互式 TUI；可能被脚本 `subprocess` 调用；需精确透传退出码和 stdio |
-| GUI | `.cmd` | 双击启动，无 stdio 顾虑；便于用户自行修改，无需编译环境 |
-
----
-
-## 踩过的坑
-
-### `NO_PROXY` 不能漏
-
-漏了它，应用自己的本地页面会走代理，同样超时：
-
-```
-本地服务 127.0.0.1:18080
-  direct    → 200
-  via proxy → 502
-```
-
-### 注册表 PATH 的类型陷阱
-
-```powershell
-# ❌ GetValue() 默认展开 %LOCALAPPDATA%，写回变成硬编码路径
-$raw = $key.GetValue('Path')
-
-# ❌ Set-ItemProperty 写入类型是 String，丢失 ExpandString
-Set-ItemProperty ... -Value $new
-
-# ✅ 正确
-$raw = $key.GetValue('Path','',[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-[Microsoft.Win32.Registry]::SetValue(..., [Microsoft.Win32.RegistryValueKind]::ExpandString)
-```
-
-### 快捷方式必须逐一验证
-
-批量修改多处时，很容易只确认手边那一个。**实测遇到过「桌面改好了、开始菜单被更新器还原」**——从桌面启动正常，从开始菜单启动原故障完整复发，极难排查。
-
-### 采样验证前先验证采样器
-
-做"流量是否全走代理"的验证时，踩了两个坑：
-
-- `netstat -ano` 单次耗时 46–53ms，400ms 轮询会漏掉短连接
-- `Get-NetTCPConnection` 会返回 `Bound`/`Listen` 状态，不过滤会误判为"直连外网"
-
----
-
-## 验证结果（实测）
-
-| 指标 | 修复前 | 修复后 |
-|---|---|---|
-| `dial tcp ... i/o timeout` | 存在 | **0 次** |
-| `ERR_TIMED_OUT` | 存在 | **0 次** |
-| 本地页面 HTTPS | 超时 | **HTTP 200 / 24ms** |
-| `SCOPE_INSUFFICIENT`（403） | 1 次 | **0 次**（重登后） |
-| 全局代理变量 | — | **全部为空（未污染）** |
-| Established 连接 | — | **59/59 走代理，外部直连 0** |
-
----
-
-## 环境
-
-| 项目 | 版本 |
-|---|---|
-| OS | Windows 11 (10.0.26200) |
-| Antigravity | 2.29.1 (Electron 44.5.1) |
-| Antigravity CLI | 1.5.3 |
-| 代理客户端 | Clash Verge Rev / mihomo v1.19.33 |
-| 编译器 | MinGW-w64 (GCC 8.1.0) |
-
----
-
-## 关于 AI 协作记录
-
-`docs/ai-collaboration/` 记录了一次完整的 **自评 → 独立复核 → 修复** 闭环：
-
-```
-01 自评     AI 主动列 4 项弱点
-    ↓ 另一个 AI 逐项实测复核
-02 复核     发现 2 项自评未披露的真实问题
-    ↓
-03 回应     承认、修复、复盘方法论缺陷
-```
-
-复核发现的两个问题：
-
-1. **开始菜单快捷方式未指向启动器** —— 会导致从该入口启动时原故障完整复发
-2. **shim 只检查 `HTTPS_PROXY`，不检查 `HTTP_PROXY`** —— 代码与注释不一致
-
-三个可复用的方法论教训：
-
-- **「改了」≠「改对了」**：批量修改多处时，必须一次性断言全部目标
-- **注释与实现不一致，编译器不报错**：注释应只写实现真正做的事
-- **「自评说没有遗漏」是最不可信的声明**
+1. **统一免依赖方案**：Windows 桌面与 CLI 共用 [src/ProxyCommon.cs](src/ProxyCommon.cs)，用系统自带 `csc.exe` 编译；Linux 共用 [linux/proxy-wrapper.sh](linux/proxy-wrapper.sh)，用 `exec` 零开销分发。代理关闭时（端口探不通）绝不注入，环境变量已配时不覆盖。
+2. **`NO_PROXY` 不能漏**：漏掉 `localhost,127.0.0.1,::1` 会导致 Electron 加载 Go 内核本地页面走代理超时/502。
+3. **兼容 Dashboard 内嵌栏（`antigravity-pulse`）**：启动器原样保留并透传 `--remote-debugging-port=0 --remote-debugging-address=127.0.0.1`，且 `AntigravityProxy.exe` 命中插件快捷方式识别白名单。
+4. **Electron Toast 桌面通知覆写开始菜单**：不仅更新器会重建开始菜单项，Electron 发通知时若检测到开始菜单 `.lnk` 的 `AppUserModelID` 不匹配也会在运行时立刻将其还原并清空参数。`repoint-shortcut.ps1` 会写回 `electron.app.Antigravity`，并支持 `-ProtectStartMenu`（`+R`）阻断覆写。
+5. **注册表 `Path` 保持 `ExpandString`**：读取用 `DoNotExpandEnvironmentNames`，写回用 `[RegistryValueKind]::ExpandString`，防止 `%LOCALAPPDATA%` 被破坏。
+6. **PowerShell 5.1 编码双重坑**：仓库所有脚本保持**纯 ASCII** 防止中文 Windows PS 5.1 按 GBK 解析报错；`diagnose-mode.ps1` 通过 `ProcessStartInfo` 指定 UTF-8 读取 Python 子进程输出，避免中文策略组名乱码。
 
 ---
 
