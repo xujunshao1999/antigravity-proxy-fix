@@ -90,8 +90,9 @@ antigravity-proxy-fix/
    - `repoint-shortcut.ps1` 与 `self-heal-shortcuts.ps1` 保存开始菜单快捷方式后，会通过 COM `IPropertyStore` 写回 `System.AppUserModel.ID = electron.app.Antigravity`；开启 `-ProtectStartMenu` 后还会附加只读属性 `+R` 阻止运行时覆写（`self-heal-shortcuts.ps1` 特意保持单文件自包含，方便用户单独拷贝到 `%USERPROFILE%\.agy-shim\`）。
 
 3. **Ubuntu / Linux multi-call wrapper**
-   - `linux/install-linux.sh` 将单个 `linux/proxy-wrapper.sh` 分别安装为 `~/.local/bin/agy` 和 `~/.local/bin/antigravity-proxy`，由 `basename "$0"` 区分入口与专属环境变量，读取 `~/.config/agy-proxy/proxy.conf` 并通过 `exec` 直接替换当前进程。
-   - 修改 `~/.local/share/applications/antigravity.desktop` 覆盖系统 `.desktop`，在检测到 `antigravity-pulse` 或显式传 `--with-debug-port` 时自动补齐 `--remote-debugging-port=0 --remote-debugging-address=127.0.0.1`。
+   - `linux/install-linux.sh` 将单个 `linux/proxy-wrapper.sh` 分别安装为 `~/.local/share/agy-proxy/bin/agy`（独立 shim 目录，不覆盖官方 `~/.local/bin/agy`）和 `~/.local/bin/antigravity-proxy`，由 `basename "$0"` 区分入口与专属环境变量，读取 `~/.config/agy-proxy/proxy.conf` 与 `app-bin.conf` 后通过 `exec` 直接替换当前进程，支持 `Antigravity.tar.gz` 解压出来的 `./Antigravity` 与常见安装目录。
+   - 针对 Ubuntu GNOME 下 Chromium `ProxyConfigServiceLinux` 会忽略 `HTTPS_PROXY` 的问题，桌面入口在检测到可用代理时会自动附带 `--proxy-server` 与 `--proxy-bypass-list`。
+   - 若系统已有 `.desktop` 则写入用户级覆盖 `~/.local/share/applications/antigravity.desktop`；若为纯 `.tar.gz` 安装（无系统 `.desktop`）且已解析到应用路径，会自动生成用户级 `.desktop` 并在检测到 `antigravity-pulse` 或显式传 `--with-debug-port` 时补齐 `--remote-debugging-port=0 --remote-debugging-address=127.0.0.1`。
 
 ---
 
@@ -146,7 +147,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows.ps1 -Purge
 
 ```bash
 chmod +x linux/*.sh
-./linux/install-linux.sh --proxy http://127.0.0.1:7890
+./linux/install-linux.sh --proxy http://127.0.0.1:7890 --app-bin ~/Downloads/Antigravity
+export PATH="$HOME/.local/share/agy-proxy/bin:$HOME/.local/bin:$PATH"
 ./linux/install-linux.sh --status
 python3 scripts/diagnose-mode.py
 ./linux/install-linux.sh --uninstall

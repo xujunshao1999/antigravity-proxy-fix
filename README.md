@@ -101,19 +101,27 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows.ps1 -Purge
 
 ## 快速开始（Ubuntu / Linux）
 
-Linux 下无需编译，CLI 与桌面版共用统一 multi-call Bash wrapper，通过 `exec` 直接替换进程透传全部参数与信号，并使用 XDG 用户级 `.desktop` 覆盖系统项（软件包升级不会被重置）：
+Linux 下无需编译，CLI 与桌面版共用统一 multi-call Bash wrapper，通过 `exec` 直接替换进程透传全部参数与信号。针对 Ubuntu 下常见的 `tar -xzf Antigravity.tar.gz`（`./Antigravity`）与官方 CLI（`~/.local/bin/agy`）做了专门适配：
+
+- **绝不覆盖官方 `~/.local/bin/agy`**：CLI 代理包装器安装到 `~/.local/share/agy-proxy/bin/agy`，只需在 `PATH` 中排在 `~/.local/bin` 之前即可。
+- **自动生成桌面图标**：对于 `Antigravity.tar.gz` 解压安装（无系统 `.desktop`），传入 `--app-bin`（或自动探测）即可生成用户级 `~/.local/share/applications/antigravity.desktop`；若系统已有 `.desktop` 则创建用户级覆盖（升级软件不会被重置）。
+- **GNOME 桌面环境兼容**：Ubuntu GNOME 下的 Chromium/Electron 会优先读 `gsettings` 而忽略 `HTTPS_PROXY`，桌面包装器会在检测到可用代理时自动附加 `--proxy-server` 与 `--proxy-bypass-list`。
 
 ```bash
+# 假设已解压官方压缩包：tar -xzf Antigravity.tar.gz（例如在 ~/Downloads/Antigravity）
 chmod +x linux/*.sh
 
-# 安装 ~/.local/bin/agy 与 ~/.local/bin/antigravity-proxy，写入 ~/.config/agy-proxy/proxy.conf
+# 安装包装器并记录真实二进制路径（可传目录或 ./Antigravity 路径；省略时自动探测）
 # 若本机检测到 antigravity-pulse 插件，会自动补齐内嵌栏调试参数（也可显式传 --with-debug-port）
-./linux/install-linux.sh --proxy http://127.0.0.1:7890
+./linux/install-linux.sh --proxy http://127.0.0.1:7890 --app-bin ~/Downloads/Antigravity
 
-# 确保 ~/.local/bin 在 PATH 最前（写入 ~/.bashrc 或 ~/.zshrc）
-export PATH="$HOME/.local/bin:$PATH"
+# 确保 shim 目录排在 ~/.local/bin 之前（写入 ~/.bashrc 或 ~/.zshrc）
+export PATH="$HOME/.local/share/agy-proxy/bin:$HOME/.local/bin:$PATH"
 
-# 查看状态 / 诊断 / 卸载
+# 也可直接在解压目录内运行桌面包装器（无配置时会自动探测当前目录的 ./Antigravity）
+antigravity-proxy
+
+# 查看状态 / 诊断 / 卸载（默认保留 proxy.conf，绝不删除官方 ~/.local/bin/agy）
 ./linux/install-linux.sh --status
 python3 scripts/diagnose-mode.py
 ./linux/install-linux.sh --uninstall

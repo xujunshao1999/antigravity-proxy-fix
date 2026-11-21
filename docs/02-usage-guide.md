@@ -111,26 +111,31 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows.ps1 -Purge
 
 ## 三、Ubuntu / Linux 安装与配置
 
-Linux 下无需编译，采用统一的 multi-call Bash wrapper（[linux/proxy-wrapper.sh](../linux/proxy-wrapper.sh)）通过 `exec` 进程替换直接注入代理并透传全部参数与信号；桌面端通过修改用户级 XDG 文件 `~/.local/share/applications/antigravity.desktop` 覆盖系统项（`apt`/客户端更新不会破坏用户目录）。
+Linux 下无需编译，采用统一的 multi-call Bash wrapper（[linux/proxy-wrapper.sh](../linux/proxy-wrapper.sh)）通过 `exec` 进程替换直接注入代理并透传全部参数与信号，同时适配官方 `Antigravity.tar.gz`（解压运行 `./Antigravity`）与官方 CLI 脚本（`~/.local/bin/agy`）：
+
+- **不会覆盖官方 `~/.local/bin/agy`**：CLI shim 安装到 `~/.local/share/agy-proxy/bin/agy`，只需在 `PATH` 中排在 `~/.local/bin` 前方。
+- **支持 `Antigravity.tar.gz` 解压安装**：若无系统 `.desktop`，传入 `--app-bin`（或自动探测）即可记录二进制路径到 `~/.config/agy-proxy/app-bin.conf` 并生成用户级 `~/.local/share/applications/antigravity.desktop`；若系统已有 `.desktop` 则创建用户级覆盖（软件包升级不会被重置）。
+- **GNOME 桌面环境自动兼容**：桌面包装器除注入 `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` 外，还会附带 `--proxy-server` 与 `--proxy-bypass-list`，避免 Chromium `ProxyConfigServiceLinux` 被 GNOME `gsettings` 覆盖而直连超时。
 
 ```bash
+# 假设已通过 tar -xzf Antigravity.tar.gz 解压到 ~/Downloads/Antigravity
 chmod +x linux/*.sh
 
-# 安装 ~/.local/bin/agy 与 ~/.local/bin/antigravity-proxy，写入 ~/.config/agy-proxy/proxy.conf
+# 安装包装器并记录应用路径（支持目录或 ./Antigravity 可执行文件；省略时自动探测）
 # 若本机检测到 antigravity-pulse 插件，会自动为 .desktop 补齐本地调试端口参数
-./linux/install-linux.sh --proxy http://127.0.0.1:7890
+./linux/install-linux.sh --proxy http://127.0.0.1:7890 --app-bin ~/Downloads/Antigravity
 
 # 如需显式开启或关闭调试参数，可传 --with-debug-port 或 --no-debug-port
 # ./linux/install-linux.sh --proxy 7897 --with-debug-port
 ```
 
-确保 `~/.local/bin` 排在 `PATH` 最前面（写入 `~/.bashrc` 或 `~/.zshrc`）：
+确保 `~/.local/share/agy-proxy/bin` 排在 `~/.local/bin` 最前面（写入 `~/.bashrc` 或 `~/.zshrc`）：
 
 ```bash
-export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.local/share/agy-proxy/bin:$HOME/.local/bin:$PATH"
 ```
 
-状态查询与一键卸载：
+也可直接在解压目录内运行 `antigravity-proxy` 启动（未配置 `app-bin.conf` 时会自动探测当前目录 `./Antigravity`）。状态查询与一键卸载（默认保留 `proxy.conf`，绝不删除官方 `~/.local/bin/agy`）：
 
 ```bash
 ./linux/install-linux.sh --status
@@ -277,7 +282,8 @@ for ($i=1; $i -le 5; $i++) { curl.exe -x http://127.0.0.1:7890 -sS "http://ip-ap
 
 | 用途 | 路径 |
 |---|---|
-| CLI & 桌面版包装器 | `~/.local/bin/agy`、`~/.local/bin/antigravity-proxy` |
-| 代理地址配置 | `~/.config/agy-proxy/proxy.conf` |
+| CLI & 桌面版包装器 | `~/.local/share/agy-proxy/bin/agy`、`~/.local/bin/antigravity-proxy` |
+| 官方 CLI（不被覆盖） | `~/.local/bin/agy` |
+| 代理地址与二进制配置 | `~/.config/agy-proxy/proxy.conf`、`~/.config/agy-proxy/app-bin.conf` |
 | 用户级桌面快捷入口 | `~/.local/share/applications/antigravity.desktop` |
 | 日志与用户配置 | `~/.config/Antigravity/logs/`、`~/.gemini/antigravity-cli/settings.json` |

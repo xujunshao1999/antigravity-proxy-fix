@@ -102,7 +102,7 @@ Go 标准库 `net/http` 通过 `http.ProxyFromEnvironment` 获取代理，**唯�
 
 2. **Ubuntu / Linux（Bash `exec` multi-call wrapper）**
    - 统一包装器：[linux/proxy-wrapper.sh](../linux/proxy-wrapper.sh)，安装脚本：[linux/install-linux.sh](../linux/install-linux.sh)。
-   - 根据 `basename "$0"` 分发为 `~/.local/bin/agy`（CLI）或 `~/.local/bin/antigravity-proxy`（桌面版），读取 `~/.config/agy-proxy/proxy.conf` 并探测端口后直接 `exec` 真实二进制，零开销透传 TTY、信号、退出码与桌面启动参数；桌面图标通过用户级 `~/.local/share/applications/antigravity.desktop` 覆盖系统项，升级软件不会被重置。
+   - 根据 `basename "$0"` 分发为 `~/.local/share/agy-proxy/bin/agy`（CLI，位于独立 shim 目录以避免覆盖官方 `~/.local/bin/agy`）与 `~/.local/bin/antigravity-proxy`（桌面版），读取 `~/.config/agy-proxy/proxy.conf` 与 `app-bin.conf` 并探测端口后直接 `exec` 真实二进制（支持 `Antigravity.tar.gz` 解压出来的 `./Antigravity`）；针对 Ubuntu GNOME Chromium 会优先读 `gsettings` 而忽略 `HTTPS_PROXY` 的问题，桌面模式会在代理可用时自动注入 `--proxy-server` 与 `--proxy-bypass-list`。若无系统 `.desktop`，安装脚本会自动生成用户级 `~/.local/share/applications/antigravity.desktop`。
 
 ---
 
