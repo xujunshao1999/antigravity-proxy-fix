@@ -1,7 +1,7 @@
-# Antigravity 国内使用指南（Windows & Ubuntu/Linux）
+# Antigravity 国内使用与排查指南（Windows 为主）
 
 > **适用版本**：Antigravity 2.33+（含 `Antigrative Dashboard` / `antigravity-pulse` 插件内嵌栏）
-> **适用系统**：Windows 10 / 11 · Ubuntu / Linux
+> **适用系统**：Windows 10 / 11（另提供跨平台节点诊断脚本 `diagnose-mode.py` / `query-mihomo.py`；原生 Ubuntu/Linux 开系统代理通常可直接使用原版 GUI 与 `agy`，无需安装包装器）
 > **前置条件**：已有可用 Google 账号，以及支持 HTTP/HTTPS 的本地代理客户端（Clash Verge Rev、mihomo、v2rayN 等）
 
 ---
@@ -10,12 +10,11 @@
 
 1. [前置检查：确认代理端口](#一前置检查确认代理端口)
 2. [Windows 安装与配置](#二windows-安装与配置)
-3. [Ubuntu / Linux 安装与配置](#三ubuntu--linux-安装与配置)
-4. [桌面版与 CLI 常用操作](#四桌面版与-cli-常用操作)
-5. [代理模式选择：规则 vs 全局 vs TUN](#五代理模式选择规则-vs-全局-vs-tun)
-6. [故障排查与一键诊断](#六故障排查与一键诊断)
-7. [账号安全与节点稳定性](#七账号安全与节点稳定性)
-8. [附录：文件与日志位置速查](#八附录文件与日志位置速查)
+3. [桌面版与 CLI 常用操作](#三桌面版与-cli-常用操作)
+4. [代理模式选择：规则 vs 全局 vs TUN](#四代理模式选择规则-vs-全局-vs-tun)
+5. [故障排查与一键诊断](#五故障排查与一键诊断)
+6. [账号安全与节点稳定性](#六账号安全与节点稳定性)
+7. [附录：文件与日志位置速查](#七附录文件与日志位置速查)
 
 ---
 
@@ -32,7 +31,7 @@
 快速确认当前监听端口：
 - **Windows**：`netstat -ano | findstr LISTENING | findstr "127.0.0.1:"`
 - **Linux**：`ss -ltnp | grep 127.0.0.1`
-- 或直接运行本仓库的跨平台诊断脚本（详见第六章）。
+- 或直接运行本仓库的诊断脚本（详见第五章）。
 
 ---
 
@@ -107,44 +106,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows.ps1 -Purge
 ```
 
----
-
-## 三、Ubuntu / Linux 安装与配置
-
-Linux 下无需编译，采用统一的 multi-call Bash wrapper（[linux/proxy-wrapper.sh](../linux/proxy-wrapper.sh)）通过 `exec` 进程替换直接注入代理并透传全部参数与信号，同时适配官方 `Antigravity.tar.gz`（解压运行 `./Antigravity`）与官方 CLI 脚本（`~/.local/bin/agy`）：
-
-- **不会覆盖官方 `~/.local/bin/agy`**：CLI shim 安装到 `~/.local/share/agy-proxy/bin/agy`，只需在 `PATH` 中排在 `~/.local/bin` 前方。
-- **支持 `Antigravity.tar.gz` 解压安装**：若无系统 `.desktop`，传入 `--app-bin`（或自动探测）即可记录二进制路径到 `~/.config/agy-proxy/app-bin.conf` 并生成用户级 `~/.local/share/applications/antigravity.desktop`；若系统已有 `.desktop` 则创建用户级覆盖（软件包升级不会被重置）。
-- **GNOME 桌面环境自动兼容**：桌面包装器除注入 `HTTPS_PROXY`/`HTTP_PROXY`/`NO_PROXY` 外，还会附带 `--proxy-server` 与 `--proxy-bypass-list`，避免 Chromium `ProxyConfigServiceLinux` 被 GNOME `gsettings` 覆盖而直连超时。
-
-```bash
-# 假设已通过 tar -xzf Antigravity.tar.gz 解压到 ~/Downloads/Antigravity
-chmod +x linux/*.sh
-
-# 安装包装器并记录应用路径（支持目录或 ./Antigravity 可执行文件；省略时自动探测）
-# 若本机检测到 antigravity-pulse 插件，会自动为 .desktop 补齐本地调试端口参数
-./linux/install-linux.sh --proxy http://127.0.0.1:7890 --app-bin ~/Downloads/Antigravity
-
-# 如需显式开启或关闭调试参数，可传 --with-debug-port 或 --no-debug-port
-# ./linux/install-linux.sh --proxy 7897 --with-debug-port
-```
-
-确保 `~/.local/share/agy-proxy/bin` 排在 `~/.local/bin` 最前面（写入 `~/.bashrc` 或 `~/.zshrc`）：
-
-```bash
-export PATH="$HOME/.local/share/agy-proxy/bin:$HOME/.local/bin:$PATH"
-```
-
-也可直接在解压目录内运行 `antigravity-proxy` 启动（未配置 `app-bin.conf` 时会自动探测当前目录 `./Antigravity`）。状态查询与一键卸载（默认保留 `proxy.conf`，绝不删除官方 `~/.local/bin/agy`）：
-
-```bash
-./linux/install-linux.sh --status
-./linux/install-linux.sh --uninstall
-```
+> **Linux / Ubuntu 说明**：原生 Ubuntu/GNOME 开系统代理后会直接下发代理环境变量，实测直接启动原版 Antigravity GUI 与官方 `agy` CLI 即可正常工作，无需安装 wrapper。如想在 Linux 上测试逐域名连通性与 Clash 策略组，可直接运行 `python3 scripts/diagnose-mode.py`。
 
 ---
 
-## 四、桌面版与 CLI 常用操作
+## 三、桌面版与 CLI 常用操作
 
 - **账号共用**：桌面版与 `agy` CLI 共用同一套系统凭据；在任一端登出重登，另一端同步生效。
 - **查看实时可用模型**：运行 `agy models`（不要依赖过时的硬编码模型名）。部分模型名已包含推理强度后缀时，再传 `--effort` 会报参数冲突，请以 `agy models` 输出为准。
@@ -166,9 +132,9 @@ export PATH="$HOME/.local/share/agy-proxy/bin:$HOME/.local/bin:$PATH"
 
 ---
 
-## 五、代理模式选择：规则 vs 全局 vs TUN
+## 四、代理模式选择：规则 vs 全局 vs TUN
 
-### 5.1 推荐选择：规则模式（Rule）
+### 4.1 推荐选择：规则模式（Rule）
 
 进程级注入只保证「Antigravity / agy 流量进入本地代理端口」，如何出站由代理客户端决定。日常使用**强烈推荐规则模式**：
 - 国内站点与本地服务不绕路境外，避免国内服务因境外出口 IP 触发风控或速度变慢；
@@ -179,7 +145,7 @@ export PATH="$HOME/.local/share/agy-proxy/bin:$HOME/.local/bin:$PATH"
   - MATCH,<你的节点组>
   ```
 
-### 5.2 常见的规则顺序陷阱
+### 4.2 常见的规则顺序陷阱
 
 部分机场订阅在 `DOMAIN-KEYWORD,google` 之前会附带一条：
 
@@ -189,15 +155,15 @@ export PATH="$HOME/.local/share/agy-proxy/bin:$HOME/.local/bin:$PATH"
 
 该条规则优先命中时，安全浏览接口会直连失败，但不影响核心模型与对话。如希望彻底干净可在自定义规则覆写中去掉该 `DIRECT` 规则。
 
-### 5.3 何时考虑 TUN 模式
+### 4.3 何时考虑 TUN 模式
 
 仅当你希望系统内所有命令行/软件全自动走代理、不介意安装虚拟网卡驱动、且机器上**没有**与虚拟网卡冲突的游戏反作弊程序时，才需考虑 TUN 模式。否则继续使用本仓库的进程级注入方案是最安全、最小侵入的选择。
 
 ---
 
-## 六、故障排查与一键诊断
+## 五、故障排查与一键诊断
 
-### 6.1 一键诊断脚本（推荐第一步）
+### 5.1 一键诊断脚本（推荐第一步）
 
 当你遇到**规则模式可用但全局模式不行**、**模型列表拉取超时**、或者不确定是**代理注入失效**还是**节点本身故障**时，直接运行：
 
@@ -205,7 +171,7 @@ export PATH="$HOME/.local/share/agy-proxy/bin:$HOME/.local/bin:$PATH"
 # Windows
 powershell -ExecutionPolicy Bypass -File .\scripts\diagnose-mode.ps1
 
-# Windows / Ubuntu / Linux 跨平台
+# Windows / Linux 跨平台
 python3 .\scripts\diagnose-mode.py
 ```
 
@@ -218,10 +184,10 @@ python3 .\scripts\diagnose-mode.py
    - **仅 `cloudcode-pa` 系列 `000`（`www.google.com` 正常）**：你的代理注入**正常**，是当前所选节点到 Google AI 上游链路故障/限流（俗称“半死节点”），**在代理客户端换一个节点即可，不要改配置文件**；
    - **TLS > 1.0s**：可用但节点延迟偏高，可切换延迟更低的节点。
 
-### 6.2 常见典型问题
+### 5.2 常见典型问题
 
 #### 1. Dashboard 插件有侧边栏、没有聊天框内嵌栏
-- 确认是通过改写后的桌面/开始菜单快捷方式（或 Linux 用户级 `.desktop`）启动的，且快捷方式参数包含 `--remote-debugging-port=0 --remote-debugging-address=127.0.0.1`；
+- 确认是通过改写后的桌面/开始菜单快捷方式启动的，且快捷方式参数包含 `--remote-debugging-port=0 --remote-debugging-address=127.0.0.1`；
 - Windows 下运行 `.\scripts\verify-review.ps1` 检查两条快捷方式是否均为 `OK`；若开始菜单被还原，运行：
   ```powershell
   powershell -ExecutionPolicy Bypass -File .\scripts\repoint-shortcut.ps1 -AddDebugPort -ProtectStartMenu
@@ -229,8 +195,8 @@ python3 .\scripts\diagnose-mode.py
 - 修改后需**完全退出并重开** Antigravity。
 
 #### 2. 桌面版一直白屏 / 转圈
-查看内核日志 `%APPDATA%\Antigravity\logs\language_server.log`（Linux 下在 `~/.config/Antigravity/logs/language_server.log`）：
-- 搜索 `dial tcp`：若出现 `i/o timeout`，说明进程未经过代理启动（检查是否从旧固定图标启动，以及本地代理软件是否运行）；
+查看内核日志 `%APPDATA%\Antigravity\logs\language_server.log`：
+- 搜索 `dial tcp`：若出现 `i/o timeout`，先运行 `scripts\verify-review.ps1` 检查是否从旧固定图标启动，或检查 `%APPDATA%\Antigravity\wsl_state.json` 是否进入了 WSL2 模式（参见 [04 · WSL 模式说明](04-wsl-mode.md)）；
 - 搜索 `connection refused`：说明代理端口未监听或 `proxy.conf` 端口号与客户端不一致。
 
 #### 3. 提示 `"Sign-in update needed"` 或日志出现 `ACCESS_TOKEN_SCOPE_INSUFFICIENT` (403)
@@ -243,7 +209,7 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 
 ---
 
-## 七、账号安全与节点稳定性
+## 六、账号安全与节点稳定性
 
 账号风控最核心的触发因素不是“使用了代理”，而是 **IP 短时间跨地区剧烈跳变**、**机房/高滥用共享 IP**、以及**多账号频繁切换**。
 
@@ -263,7 +229,7 @@ for ($i=1; $i -le 5; $i++) { curl.exe -x http://127.0.0.1:7890 -sS "http://ip-ap
 
 ---
 
-## 八、附录：文件与日志位置速查
+## 七、附录：文件与日志位置速查
 
 ### Windows 关键路径
 
@@ -275,15 +241,6 @@ for ($i=1; $i -le 5; $i++) { curl.exe -x http://127.0.0.1:7890 -sS "http://ip-ap
 | CLI 转发器 | `%LOCALAPPDATA%\agy\shim\agy.exe` |
 | 桌面版原始程序 | `%LOCALAPPDATA%\Programs\antigravity\Antigravity.exe` |
 | CLI 原始程序 | `%LOCALAPPDATA%\agy\bin\agy.exe` |
+| WSL2 后端状态文件 | `%APPDATA%\Antigravity\wsl_state.json` |
 | Electron 外壳日志 | `%APPDATA%\Antigravity\logs\main.log` |
 | Go 内核日志 | `%APPDATA%\Antigravity\logs\language_server.log` |
-
-### Ubuntu / Linux 关键路径
-
-| 用途 | 路径 |
-|---|---|
-| CLI & 桌面版包装器 | `~/.local/share/agy-proxy/bin/agy`、`~/.local/bin/antigravity-proxy` |
-| 官方 CLI（不被覆盖） | `~/.local/bin/agy` |
-| 代理地址与二进制配置 | `~/.config/agy-proxy/proxy.conf`、`~/.config/agy-proxy/app-bin.conf` |
-| 用户级桌面快捷入口 | `~/.local/share/applications/antigravity.desktop` |
-| 日志与用户配置 | `~/.config/Antigravity/logs/`、`~/.gemini/antigravity-cli/settings.json` |

@@ -41,7 +41,7 @@ foreach ($c in $cscCandidates) {
 }
 
 if (-not $csc) {
-    Write-Error 'Built-in .NET Framework 4 csc.exe was not found under Windows\Microsoft.NET.'
+    Write-Error 'Built-in .NET Framework 4 csc.exe was not found under Windows\Microsoft.NET. Alternatively, you can use a .cmd batch launcher that sets HTTPS_PROXY/HTTP_PROXY/NO_PROXY and runs Antigravity.exe %*.'
     exit 1
 }
 

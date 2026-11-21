@@ -1,6 +1,6 @@
 # 本地页面超时，根因却在远端：Antigravity / agy 代理原理与避坑
 
-> **适用版本**：Antigravity 2.33+（Windows 10/11 & Ubuntu/Linux）
+> **适用版本**：Antigravity 2.33+（Windows 10/11；原生 Ubuntu/Linux 开启系统代理通常可直接工作）
 > **症状**：桌面版白屏/转圈，或插件内嵌栏不显示；CLI 登录/请求超时
 > **根因**：Go 内核只认环境变量，不读系统代理；传统 `.cmd`/清理参数做法又与插件调试端口及 Electron 通知机制冲突
 
@@ -77,7 +77,7 @@ Go 标准库 `net/http` 通过 `http.ProxyFromEnvironment` 获取代理，**唯�
 | 全局环境变量（`setx` / `/etc/environment`） | 高 | 全系统 | 本机服务（`127.0.0.1`）被送进代理返回 `502`；内网设备失灵；代理一关全系统断网 |
 | TUN / 透明代理 | 中 | 全系统 | 需安装虚拟网卡驱动或高权限；与部分游戏反作弊可能冲突 |
 | `netsh winhttp set proxy` | 中 | 仅 WinHTTP 程序 | **对 Go 程序无效** |
-| **进程级注入（本仓库）** | **低** | **仅目标进程树** | 需通过本仓库启动器/wrapper 启动目标程序 |
+| **进程级注入（本仓库）** | **低** | **仅目标进程树** | 需通过本仓库启动器/shim 启动目标程序 |
 
 实测对照组（本机监听 `127.0.0.1:18080`）：
 - `direct` -> `200`
@@ -89,20 +89,17 @@ Go 标准库 `net/http` 通过 `http.ProxyFromEnvironment` 获取代理，**唯�
 
 ## 五、进程级注入的实现架构
 
-为了做到零外部编译依赖、支持插件（如 `Antigrative Dashboard`）并跨平台一致，本仓库采用以下统一实现：
+为了做到零外部编译依赖、支持插件（如 `Antigrative Dashboard`）并保持实现统一，Windows 下采用以下共享架构：
 
-1. **Windows 桌面版与 CLI（C#，免装 MinGW）**
-   - 共享核心逻辑：[src/ProxyCommon.cs](../src/ProxyCommon.cs)
-     - 若进程环境已存在 `HTTP_PROXY`/`HTTPS_PROXY`（含小写）则原样放行；
-     - 否则依次读取专属环境变量（`ANTIGRAVITY_PROXY` / `AGY_PROXY`）、`proxy.conf`（程序目录或 `%USERPROFILE%\.agy-shim\proxy.conf`）、以及默认端口 `7897` / `7890` / `10809`，仅在 TCP 探活成功时注入 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`；
-     - 通过 `GetCommandLineW` 提取原始尾部参数串原样透传，避免二次解析破坏引号或空格。
-   - 桌面版启动器：[src/AntigravityProxy.cs](../src/AntigravityProxy.cs)（由 [scripts/build-desktop-launcher.ps1](../scripts/build-desktop-launcher.ps1) 调用 Windows 自带 `.NET Framework 4 csc.exe` 编译为无窗口 GUI exe）。
-     - 命名 `AntigravityProxy.exe` 可直接命中 `antigravity-pulse` 的桌面快捷方式识别白名单，从而与 `--remote-debugging-port=0 --remote-debugging-address=127.0.0.1` 和谐共存。
-   - CLI 转发器：[src/AgyShim.cs](../src/AgyShim.cs)（由 [scripts/build-cli-shim.ps1](../scripts/build-cli-shim.ps1) 编译为控制台 exe 放到 `PATH` 最前），支持 `--version` 版本自证、`Ctrl+C` 透传与退出码精确返回。
+- 共享核心逻辑：[src/ProxyCommon.cs](../src/ProxyCommon.cs)
+  - 若进程环境已存在 `HTTP_PROXY`/`HTTPS_PROXY`（含小写）则原样放行；
+  - 否则依次读取专属环境变量（`ANTIGRAVITY_PROXY` / `AGY_PROXY`）、`proxy.conf`（程序目录或 `%USERPROFILE%\.agy-shim\proxy.conf`）、以及默认回退端口 `7897` / `7890` / `10809`，仅在 TCP 探活成功时注入 `HTTPS_PROXY`、`HTTP_PROXY` 和 `NO_PROXY`；
+  - 通过 `GetCommandLineW` 提取原始尾部参数串原样透传，避免二次解析破坏引号或空格。
+- 桌面版启动器：[src/AntigravityProxy.cs](../src/AntigravityProxy.cs)（由 [scripts/build-desktop-launcher.ps1](../scripts/build-desktop-launcher.ps1) 调用 Windows 自带 `.NET Framework 4 csc.exe` 编译为无窗口 GUI exe）。
+  - 命名 `AntigravityProxy.exe` 可直接命中 `antigravity-pulse` 的桌面快捷方式识别白名单，从而与 `--remote-debugging-port=0 --remote-debugging-address=127.0.0.1` 和谐共存。
+- CLI 转发器：[src/AgyShim.cs](../src/AgyShim.cs)（由 [scripts/build-cli-shim.ps1](../scripts/build-cli-shim.ps1) 编译为控制台 exe 放到 `PATH` 最前），支持 `--version` 版本自证、`Ctrl+C` 透传与退出码精确返回。
 
-2. **Ubuntu / Linux（Bash `exec` multi-call wrapper）**
-   - 统一包装器：[linux/proxy-wrapper.sh](../linux/proxy-wrapper.sh)，安装脚本：[linux/install-linux.sh](../linux/install-linux.sh)。
-   - 根据 `basename "$0"` 分发为 `~/.local/share/agy-proxy/bin/agy`（CLI，位于独立 shim 目录以避免覆盖官方 `~/.local/bin/agy`）与 `~/.local/bin/antigravity-proxy`（桌面版），读取 `~/.config/agy-proxy/proxy.conf` 与 `app-bin.conf` 并探测端口后直接 `exec` 真实二进制（支持 `Antigravity.tar.gz` 解压出来的 `./Antigravity`）；针对 Ubuntu GNOME Chromium 会优先读 `gsettings` 而忽略 `HTTPS_PROXY` 的问题，桌面模式会在代理可用时自动注入 `--proxy-server` 与 `--proxy-bypass-list`。若无系统 `.desktop`，安装脚本会自动生成用户级 `~/.local/share/applications/antigravity.desktop`。
+> **关于原生 Linux / Ubuntu**：与 Windows 不同，原生 Ubuntu/GNOME 在开启系统代理时，桌面会话与终端通常已同步下发代理环境变量（不存在“Electron 认注册表、Go 内核完全拿不到变量”的分裂），实测直接启动原版 GUI 与 `agy` 即可正常工作，不需要额外 wrapper。但如果 Windows 客户端跑在 **WSL2 模式**下（`%APPDATA%\Antigravity\wsl_state.json` 的 `distro` 非空），请参阅 [04 · WSL 模式说明](04-wsl-mode.md)。
 
 ---
 

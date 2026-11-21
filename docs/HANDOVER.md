@@ -1,7 +1,7 @@
 # 交接报告：Antigravity / agy 代理方案
 
-> **适用系统**：Windows 10 / 11 · Ubuntu / Linux
-> **当前版本**：v2.1.0（零 MinGW 依赖 C# 启动器 + Linux multi-call wrapper + 插件内嵌栏与开始菜单保护）
+> **适用系统**：Windows 10 / 11
+> **当前版本**：v2.1.0（零 MinGW 依赖 C# 启动器 + 插件内嵌栏与开始菜单保护 + 跨平台诊断 + WSL2 文档同步）
 > **仓库**：https://github.com/xiaobaijiadepugongyingpai-coder/antigravity-proxy-fix
 
 ---
@@ -13,9 +13,9 @@
 | 核心问题（Go 不读系统代理） | ✅ 已通过进程级环境变量注入彻底解决 |
 | Dashboard 插件内嵌栏兼容性 | ✅ 已解决（`AntigravityProxy.exe` + 保留/补全 `--remote-debugging-port`） |
 | 开始菜单快捷方式运行时被还原 | ✅ 已查明 Electron Toast AUMID 根因并修复（`IPropertyStore` + `-ProtectStartMenu` `+R`） |
-| Ubuntu / Linux 支持 | ✅ 已完成（统一 `linux/proxy-wrapper.sh` + `install-linux.sh` + `query-mihomo.py` 跨平台） |
-| 零外部编译依赖 | ✅ Windows 仅依赖自带 `.NET Framework 4 csc.exe`；Linux 纯 Bash + Python 3 |
-| 自动化 CI | ✅ 已配置 `.github/workflows/ci.yml`（ASCII / LF / PS AST / Bash / Linux 冒烟 / `csc.exe` 编译） |
+| WSL2 后端模式排查文档（`04-wsl-mode.md`） | ✅ 已从上游同步，支持通过 `wsl_state.json` 识别并启用镜像网络 |
+| 零外部编译依赖 | ✅ 仅依赖 Windows 自带 `.NET Framework 4 csc.exe` 与 Python 3 诊断脚本 |
+| 自动化 CI | ✅ 已配置 `.github/workflows/ci.yml`（ASCII / LF / PS AST / Python 语法 / `csc.exe` 编译 / 卸载冒烟） |
 | 外部待办 | ⏳ 另一台机器的「规则模式 vs 全局模式」差异待在目标机实测；可选补充 GitHub Releases 预编译包 |
 
 ---
@@ -50,20 +50,18 @@ Antigravity（Electron 外壳）   ← 认系统代理，也认环境变量
 
 ```text
 antigravity-proxy-fix/
-├── .github/workflows/ci.yml           CI（ASCII / LF / PS / Bash / Linux 冒烟 / csc 编译）
+├── .github/workflows/ci.yml           CI（ASCII / LF / PS / Python / csc 编译 / 卸载冒烟）
 ├── README.md
 ├── LICENSE
 ├── docs/
 │   ├── 01-technical-go-proxy.md       技术原理与工程避坑
-│   ├── 02-usage-guide.md              Windows & Linux 完整使用与排查指南
+│   ├── 02-usage-guide.md              Windows 使用与排查指南
+│   ├── 04-wsl-mode.md                 WSL2 后端模式排查与镜像网络解法
 │   └── HANDOVER.md                    本交接文档
 ├── src/
 │   ├── ProxyCommon.cs                 共享模块：代理发现/探活/proxy.conf 读取与原始命令行提取
 │   ├── AntigravityProxy.cs            Windows 桌面版无窗口启动器（透传参数，兼容插件）
 │   └── AgyShim.cs                     Windows CLI 转发器（透传参数/TUI/Ctrl+C/退出码）
-├── linux/
-│   ├── proxy-wrapper.sh               Ubuntu/Linux 统一 multi-call wrapper（agy & antigravity-proxy）
-│   └── install-linux.sh               Ubuntu/Linux 一键安装、状态检查与卸载脚本
 └── scripts/
     ├── build-desktop-launcher.ps1     用自带 csc.exe 编译 AntigravityProxy.exe 并管理 proxy.conf
     ├── build-cli-shim.ps1             用自带 csc.exe 编译 agy.exe 并以 ExpandString 插入 PATH 最前
@@ -71,7 +69,7 @@ antigravity-proxy-fix/
     ├── self-heal-shortcuts.ps1        登录自愈（自包含、幂等、保留参数并写回 AUMID）
     ├── self-heal-shortcuts.vbs        开机启动项无窗口包装
     ├── agy-proxy-toggle.ps1           交互式启用/停用/查看 CLI shim 状态
-    ├── query-mihomo.py                查询 Clash/mihomo 模式与策略组（Windows 命名管道 / Linux Unix socket & HTTP）
+    ├── query-mihomo.py                查询 Clash/mihomo 模式与策略组（Windows 命名管道 / Unix socket / HTTP）
     ├── diagnose-mode.ps1              Windows 一键诊断模式、策略组与逐域名 TLS（UTF-8 管道防乱码）
     ├── diagnose-mode.py               跨平台一键诊断脚本（Windows + Linux）
     ├── verify-review.ps1              Windows 部署健康度全面检查
@@ -89,10 +87,7 @@ antigravity-proxy-fix/
    - 除了安装更新会重建快捷方式外，**Electron 的 Windows Toast 通知在运行时也会校验并覆写 `Start Menu\Programs\Antigravity.lnk`**。
    - `repoint-shortcut.ps1` 与 `self-heal-shortcuts.ps1` 保存开始菜单快捷方式后，会通过 COM `IPropertyStore` 写回 `System.AppUserModel.ID = electron.app.Antigravity`；开启 `-ProtectStartMenu` 后还会附加只读属性 `+R` 阻止运行时覆写（`self-heal-shortcuts.ps1` 特意保持单文件自包含，方便用户单独拷贝到 `%USERPROFILE%\.agy-shim\`）。
 
-3. **Ubuntu / Linux multi-call wrapper**
-   - `linux/install-linux.sh` 将单个 `linux/proxy-wrapper.sh` 分别安装为 `~/.local/share/agy-proxy/bin/agy`（独立 shim 目录，不覆盖官方 `~/.local/bin/agy`）和 `~/.local/bin/antigravity-proxy`，由 `basename "$0"` 区分入口与专属环境变量，读取 `~/.config/agy-proxy/proxy.conf` 与 `app-bin.conf` 后通过 `exec` 直接替换当前进程，支持 `Antigravity.tar.gz` 解压出来的 `./Antigravity` 与常见安装目录。
-   - 针对 Ubuntu GNOME 下 Chromium `ProxyConfigServiceLinux` 会忽略 `HTTPS_PROXY` 的问题，桌面入口在检测到可用代理时会自动附带 `--proxy-server` 与 `--proxy-bypass-list`。
-   - 若系统已有 `.desktop` 则写入用户级覆盖 `~/.local/share/applications/antigravity.desktop`；若为纯 `.tar.gz` 安装（无系统 `.desktop`）且已解析到应用路径，会自动生成用户级 `.desktop` 并在检测到 `antigravity-pulse` 或显式传 `--with-debug-port` 时补齐 `--remote-debugging-port=0 --remote-debugging-address=127.0.0.1`。
+> 注：经 Ubuntu 真机验证，原生 Linux 在开启系统代理时桌面 GUI 与官方 `agy` CLI 本身即可正常工作，因此本仓库已移除不需要的 Linux 包装脚本，仅保留跨平台诊断脚本 `query-mihomo.py` / `diagnose-mode.py`。
 
 ---
 
@@ -143,17 +138,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\uninstall-windows.ps1 -Purge
 ```
 
-### 3.4 Ubuntu / Linux 部署与卸载
-
-```bash
-chmod +x linux/*.sh
-./linux/install-linux.sh --proxy http://127.0.0.1:7890 --app-bin ~/Downloads/Antigravity
-export PATH="$HOME/.local/share/agy-proxy/bin:$HOME/.local/bin:$PATH"
-./linux/install-linux.sh --status
-python3 scripts/diagnose-mode.py
-./linux/install-linux.sh --uninstall
-```
-
 ---
 
 ## 4. 故障诊断决策树
@@ -184,13 +168,12 @@ python3 scripts/diagnose-mode.py
 | Windows 采用内置 `csc.exe` 编译 C# 5 | 零外部依赖（免 MinGW），同时兼顾原生无窗口启动、精确透传参数与退出码 |
 | 提取 `src/ProxyCommon.cs` | 消除桌面版与 CLI 重复的 `proxy.conf`、TCP 探活和命令行截取逻辑 |
 | `self-heal-shortcuts.ps1` 保持自包含 | 用户会将其单独复制到 `%USERPROFILE%\.agy-shim\`，不能依赖仓库内其他 `.ps1` |
-| 所有 `.ps1` / `.vbs` / `.cs` / `.sh` 纯 ASCII | 防止中文 Windows PS 5.1 按 GBK 解析无 BOM UTF-8 脚本报 `ParserError` |
+| 所有 `.ps1` / `.vbs` / `.cs` 纯 ASCII | 防止中文 Windows PS 5.1 按 GBK 解析无 BOM UTF-8 脚本报 `ParserError` |
 | `diagnose-mode.ps1` 用 `ProcessStartInfo` 读 UTF-8 | 解决中文 Windows PS 5.1 终端（CP936）直接调用 Python 输出策略组名称时的中文乱码 |
-| Linux 单文件 `linux/proxy-wrapper.sh` | 消除 CLI 与桌面脚本重复逻辑；保留纯 LF 换行并通过 CI 自动校验 |
 
 ### 提交前检查（本地与 CI 一致）
 
-1. 所有 `.ps1` / `.vbs` / `.cs` / `.sh` / `ci.yml` 保持纯 ASCII；`linux/*.sh` 与 `ci.yml` 保持纯 LF（无 CRLF）。
+1. 所有 `.ps1` / `.vbs` / `.cs` / `.github/workflows/ci.yml` 保持纯 ASCII；`scripts/*.py` 与 `.github/workflows/ci.yml` 保持纯 LF（无 CRLF）。
 2. 所有 `scripts/*.ps1` 通过 `[System.Management.Automation.Language.Parser]::ParseFile` 解析。
 3. `python -m py_compile scripts/query-mihomo.py scripts/diagnose-mode.py`（检查完不要保留 `__pycache__`）。
 4. 改过共享逻辑或端口规则后，同步核对文档引用，确保不包含已删除的旧文件名或个人隐私信息。
